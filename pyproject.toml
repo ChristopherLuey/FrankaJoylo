@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "franka_joylo"
+version = "0.1.0"
+description = "Teleoperate a Franka Panda using a 7-DOF Joylo controller"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "dynamixel-sdk",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]

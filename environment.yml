@@ -1,0 +1,10 @@
+name: franka_joylo
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - pip
+  - pip:
+      - dynamixel-sdk
+      - -e .
