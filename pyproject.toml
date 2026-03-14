@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "franka_joylo"
@@ -11,6 +11,9 @@ dependencies = [
     "numpy",
     "dynamixel-sdk",
 ]
+
+[tool.setuptools.packages.find]
+include = ["franka_joylo*"]
 
 [project.optional-dependencies]
 sim = ["mujoco>=3.0"]
