@@ -1,16 +1,14 @@
-"""Interactive calibration script for the Joylo.
+"""Calibration script for the Joylo.
 
 Workflow:
   1. Scans both USB ports and verifies motor connectivity
-  2. Prompts for joint_offsets_rad (Franka's current joint angles)
-  3. Saves config.json (joint signs default to +1 — tune them in the sim)
+  2. Saves config.json with default signs (+1) and offsets (0)
+  3. Signs and offsets are tuned live in the sim viewer (sim_teleop.py)
 """
 
 import argparse
 import json
 from pathlib import Path
-
-import numpy as np
 
 from franka_joylo.constants import (
     CONTROLLER_1_MOTOR_IDS,
@@ -65,26 +63,13 @@ def main():
 
     print(f"\n  All 7 motors found!")
 
-    # Step 2: Joint offsets
-    print("\n=== Step 2: Joint offsets ===")
-    print("Enter the Franka's current joint angles (radians) that match")
-    print("the Joylo's current pose. 7 values separated by spaces.")
-    print("(Press Enter to use all zeros)")
-    print()
-    raw_input = input("  Franka joint angles (rad): ").strip()
-    if raw_input:
-        offsets = np.array([float(x) for x in raw_input.split()])
-        assert len(offsets) == 7, "Expected 7 values"
-    else:
-        offsets = np.zeros(7)
-
-    # Step 3: Save config
+    # Step 2: Save config
     config = {
         "port_5v": args.port_5v,
         "port_12v": args.port_12v,
         "baudrate": args.baudrate,
         "joint_signs": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-        "joint_offsets_rad": offsets.tolist(),
+        "joint_offsets_rad": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         "gravity_comp_currents": [0, 0, 0, 0, 0, 0, 0],
     }
 
@@ -92,7 +77,7 @@ def main():
         json.dump(config, f, indent=2)
 
     print(f"\nConfig saved to {config_path}")
-    print("Joint signs are all +1. Tune them in the sim viewer (press 0-6 to flip).")
+    print("Tune joint signs and offsets in the sim viewer (sim_teleop.py).")
 
 
 if __name__ == "__main__":

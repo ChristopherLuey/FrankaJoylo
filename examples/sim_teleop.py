@@ -1,14 +1,18 @@
 """MuJoCo sim teleop: Joylo drives a simulated Franka in a 3D viewer.
 
-While the viewer is running, type commands in the terminal:
-  0-6   flip the sign for that joint
-  s     save current signs to config.json
-  q     quit
+Interactive tuning — type commands in the terminal while watching the sim:
+
+  0-6       select active joint
+  f         flip sign of active joint
+  + / -     nudge offset of active joint by +/- 0.1 rad
+  ] / [     nudge offset of active joint by +/- 0.01 rad (fine)
+  r         reset offset of active joint to 0
+  s         save config to disk
+  q         quit
 """
 
 import argparse
 import json
-import sys
 import threading
 import time
 from pathlib import Path
@@ -22,42 +26,79 @@ from franka_joylo.sim import SimFrankaInterface
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 
+COARSE_STEP = 0.1   # radians
+FINE_STEP = 0.01    # radians
+
+
+def _print_status(joylo: Joylo, active: int):
+    signs = joylo.joint_signs
+    offsets = joylo.joint_offsets_rad
+    parts = []
+    for i in range(7):
+        s = "+" if signs[i] > 0 else "-"
+        marker = "*" if i == active else " "
+        parts.append(f"{marker}J{i}: {s}1  {offsets[i]:+.3f}")
+    print("  " + "  |  ".join(parts))
+
+
+def _save_config(config_path: str, joylo: Joylo):
+    with open(config_path) as f:
+        config = json.load(f)
+    config["joint_signs"] = joylo.joint_signs.tolist()
+    config["joint_offsets_rad"] = joylo.joint_offsets_rad.tolist()
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
 
 def _input_loop(joylo: Joylo, config_path: str, stop_event: threading.Event):
-    """Read terminal commands to flip joint signs and save config."""
+    active = 0
+    _print_status(joylo, active)
+
     while not stop_event.is_set():
         try:
-            cmd = input().strip()
+            cmd = input("> ").strip()
         except EOFError:
             break
 
         if cmd in ("q", "quit"):
             stop_event.set()
             break
-        elif cmd == "s":
-            _save_signs(config_path, joylo.joint_signs)
-            print(f"  Saved signs to {config_path}")
         elif cmd in [str(i) for i in range(7)]:
-            idx = int(cmd)
-            joylo.flip_joint_sign(idx)
-            signs = joylo.joint_signs
-            label = "+" if signs[idx] > 0 else "-"
-            print(f"  Joint {idx} sign -> {label}1   (all: {_fmt_signs(signs)})")
+            active = int(cmd)
+            print(f"  Active joint: {active}")
+            _print_status(joylo, active)
+        elif cmd == "f":
+            joylo.flip_joint_sign(active)
+            s = "+" if joylo.joint_signs[active] > 0 else "-"
+            print(f"  J{active} sign -> {s}1")
+            _print_status(joylo, active)
+        elif cmd == "+":
+            joylo.nudge_joint_offset(active, COARSE_STEP)
+            print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (+{COARSE_STEP})")
+            _print_status(joylo, active)
+        elif cmd == "-":
+            joylo.nudge_joint_offset(active, -COARSE_STEP)
+            print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (-{COARSE_STEP})")
+            _print_status(joylo, active)
+        elif cmd == "]":
+            joylo.nudge_joint_offset(active, FINE_STEP)
+            print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (+{FINE_STEP})")
+            _print_status(joylo, active)
+        elif cmd == "[":
+            joylo.nudge_joint_offset(active, -FINE_STEP)
+            print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (-{FINE_STEP})")
+            _print_status(joylo, active)
+        elif cmd == "r":
+            old = joylo.joint_offsets_rad[active]
+            joylo.nudge_joint_offset(active, -old)
+            print(f"  J{active} offset -> 0.000 rad  (reset)")
+            _print_status(joylo, active)
+        elif cmd == "s":
+            _save_config(config_path, joylo)
+            print(f"  Saved to {config_path}")
         else:
-            print("  Commands: 0-6 (flip joint), s (save), q (quit)")
-
-
-def _save_signs(config_path: str, signs: np.ndarray):
-    """Update just the joint_signs field in the config file."""
-    with open(config_path) as f:
-        config = json.load(f)
-    config["joint_signs"] = signs.tolist()
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
-
-
-def _fmt_signs(signs: np.ndarray) -> str:
-    return "[" + ", ".join(f"{'+' if s > 0 else '-'}1" for s in signs) + "]"
+            print("  Commands: 0-6 (select joint), f (flip sign), +/- (offset 0.1),")
+            print("           ]/[ (offset 0.01), r (reset offset), s (save), q (quit)")
 
 
 def main():
@@ -70,7 +111,6 @@ def main():
                         help="EMA smoothing factor (1.0 = no smoothing)")
     args = parser.parse_args()
 
-    # Load calibration config
     with open(args.config) as f:
         config = json.load(f)
 
@@ -78,14 +118,10 @@ def main():
     print(f"  5V port:  {config['port_5v']}")
     print(f"  12V port: {config['port_12v']}")
 
-    # Create sim Franka
     sim_franka = SimFrankaInterface.create()
     model, data = sim_franka.model, sim_franka.data
-
-    # Set initial control to home pose so the sim doesn't collapse
     data.ctrl[:] = data.qpos[:7]
 
-    # Create Joylo
     joylo = Joylo(
         port_5v=config["port_5v"],
         port_12v=config["port_12v"],
@@ -94,19 +130,17 @@ def main():
         gravity_comp_currents=np.array(config.get("gravity_comp_currents", [0]*7), dtype=int),
     )
 
-    # Create system
     system = JoyloSystem(sim_franka, joylo,
                          control_rate_hz=args.rate,
                          smoothing_alpha=args.alpha)
 
     print()
-    print("Starting teleop (Joylo leads, sim Franka follows)...")
-    print(f"Current signs: {_fmt_signs(joylo.joint_signs)}")
+    print("Teleop running. Move the Joylo and watch the sim Franka.")
     print()
-    print("Move the Joylo and watch the sim. If a joint moves the wrong way, flip it:")
-    print("  0-6   flip that joint's sign")
-    print("  s     save signs to config.json")
-    print("  q     quit")
+    print("  0-6       select joint         f         flip sign")
+    print("  + / -     offset +/- 0.1 rad   ] / [     offset +/- 0.01 rad")
+    print("  r         reset offset          s         save config")
+    print("  q         quit")
     print()
 
     system.start_teleop()

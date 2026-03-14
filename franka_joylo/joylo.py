@@ -103,9 +103,18 @@ class Joylo:
         """Current joint sign array (shape (7,), values +1 or -1)."""
         return self._joint_signs.copy()
 
+    @property
+    def joint_offsets_rad(self) -> np.ndarray:
+        """Current joint offset array in radians (shape (7,))."""
+        return self._joint_offsets_rad.copy()
+
     def flip_joint_sign(self, joint_idx: int) -> None:
         """Flip the sign (+1 <-> -1) for a single joint."""
         self._joint_signs[joint_idx] *= -1
+
+    def nudge_joint_offset(self, joint_idx: int, delta_rad: float) -> None:
+        """Add delta_rad to a single joint's offset."""
+        self._joint_offsets_rad[joint_idx] += delta_rad
 
     def disable_torque(self) -> None:
         """Disable torque on all motors."""
