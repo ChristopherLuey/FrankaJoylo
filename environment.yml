@@ -7,4 +7,5 @@ dependencies:
   - pip
   - pip:
       - dynamixel-sdk
+      - mujoco>=3.0
       - -e .

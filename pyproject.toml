@@ -13,4 +13,5 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+sim = ["mujoco>=3.0"]
+dev = ["pytest", "mujoco>=3.0"]
