@@ -2,10 +2,8 @@
 
 Workflow:
   1. Scans both USB ports and verifies motor connectivity
-  2. Reads raw positions from all 7 motors
-  3. Lets you determine joint_signs by moving each joint
-  4. Prompts for joint_offsets_rad (Franka's current joint angles)
-  5. Saves config.json and prints a ready-to-copy config dict
+  2. Prompts for joint_offsets_rad (Franka's current joint angles)
+  3. Saves config.json (joint signs default to +1 — tune them in the sim)
 """
 
 import argparse
@@ -34,46 +32,11 @@ def scan_motors(port: str, motor_ids: list[int], baudrate: int) -> dict[int, int
         return {}
 
 
-def determine_joint_signs(driver_5v: DxlDriver, driver_12v: DxlDriver) -> np.ndarray:
-    """Interactively determine joint signs by asking user to move each joint."""
-    all_ids = sorted(CONTROLLER_1_MOTOR_IDS + CONTROLLER_2_MOTOR_IDS)
-    signs = np.ones(7)
-
-    print("\n--- Joint Sign Calibration ---")
-    print("For each joint, move it in the POSITIVE direction on the Franka")
-    print("(i.e., the direction that increases the Franka joint angle).")
-    print()
-
-    for i, mid in enumerate(all_ids):
-        input(f"  Joint {i} (motor {mid}): Press Enter, then move in Franka-positive direction...")
-
-        # Read initial position
-        pos_before = {**driver_5v.read_positions(), **driver_12v.read_positions()}
-        raw_before = pos_before[mid]
-
-        input(f"  Joint {i} (motor {mid}): Press Enter when done moving.")
-
-        pos_after = {**driver_5v.read_positions(), **driver_12v.read_positions()}
-        raw_after = pos_after[mid]
-
-        delta = raw_after - raw_before
-        if abs(delta) < 10:
-            print(f"    WARNING: Very small movement detected ({delta} ticks). Try again or default to +1.")
-            signs[i] = 1.0
-        else:
-            signs[i] = 1.0 if delta > 0 else -1.0
-            direction = "+" if signs[i] > 0 else "-"
-            print(f"    Detected delta={delta} ticks -> sign={direction}1")
-
-    return signs
-
-
 def main():
     parser = argparse.ArgumentParser(description="Joylo calibration utility")
     parser.add_argument("--port-5v", default="/dev/ttyUSB0", help="USB port for 5V controller (XL330)")
     parser.add_argument("--port-12v", default="/dev/ttyUSB1", help="USB port for 12V controller (XL430)")
     parser.add_argument("--baudrate", type=int, default=57600)
-    parser.add_argument("--skip-signs", action="store_true", help="Skip joint sign calibration (assume all +1)")
     parser.add_argument("--output", type=str, default=None,
                         help="Path to save config JSON (default: <project_root>/config.json)")
     args = parser.parse_args()
@@ -100,27 +63,13 @@ def main():
         print("    FAILED — check port and connections")
         return
 
-    all_ids = sorted(CONTROLLER_1_MOTOR_IDS + CONTROLLER_2_MOTOR_IDS)
-    merged = {**pos_5v, **pos_12v}
     print(f"\n  All 7 motors found!")
 
-    # Step 2: Joint signs
-    if args.skip_signs:
-        signs = np.ones(7)
-        print("\n=== Step 2: Joint signs (skipped, all +1) ===")
-    else:
-        print("\n=== Step 2: Joint sign calibration ===")
-        driver_5v = DxlDriver(args.port_5v, CONTROLLER_1_MOTOR_IDS, args.baudrate)
-        driver_12v = DxlDriver(args.port_12v, CONTROLLER_2_MOTOR_IDS, args.baudrate)
-        signs = determine_joint_signs(driver_5v, driver_12v)
-        driver_5v.close()
-        driver_12v.close()
-
-    # Step 3: Joint offsets
-    print("\n=== Step 3: Joint offsets ===")
-    print("Place the Joylo in its startup pose and read the Franka's current joint angles.")
-    print("Enter the 7 Franka joint angles in radians, separated by spaces.")
-    print("(If the Joylo startup pose matches Franka home [0,0,0,0,0,0,0], just press Enter)")
+    # Step 2: Joint offsets
+    print("\n=== Step 2: Joint offsets ===")
+    print("Enter the Franka's current joint angles (radians) that match")
+    print("the Joylo's current pose. 7 values separated by spaces.")
+    print("(Press Enter to use all zeros)")
     print()
     raw_input = input("  Franka joint angles (rad): ").strip()
     if raw_input:
@@ -129,35 +78,21 @@ def main():
     else:
         offsets = np.zeros(7)
 
-    # Step 4: Save config
+    # Step 3: Save config
     config = {
         "port_5v": args.port_5v,
         "port_12v": args.port_12v,
         "baudrate": args.baudrate,
-        "joint_signs": signs.tolist(),
+        "joint_signs": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         "joint_offsets_rad": offsets.tolist(),
         "gravity_comp_currents": [0, 0, 0, 0, 0, 0, 0],
     }
 
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
-    print(f"\n=== Config saved to {config_path} ===")
 
-    print("\nExample usage:\n")
-    print(f"""
-import json, numpy as np
-from franka_joylo import Joylo
-
-with open("{config_path}") as f:
-    cfg = json.load(f)
-
-joylo = Joylo(
-    port_5v=cfg["port_5v"],
-    port_12v=cfg["port_12v"],
-    joint_signs=np.array(cfg["joint_signs"]),
-    joint_offsets_rad=np.array(cfg["joint_offsets_rad"]),
-)
-""")
+    print(f"\nConfig saved to {config_path}")
+    print("Joint signs are all +1. Tune them in the sim viewer (press 0-6 to flip).")
 
 
 if __name__ == "__main__":

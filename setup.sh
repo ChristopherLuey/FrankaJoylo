@@ -3,9 +3,9 @@
 # FrankaJoylo Setup Script
 #
 # 1. Identifies USB ports by detecting unplug/replug
-# 2. Runs interactive calibration (joint signs + offsets)
+# 2. Runs calibration (scans motors, sets offsets)
 # 3. Saves config.json
-# 4. Launches MuJoCo sim teleop viewer
+# 4. Launches MuJoCo sim teleop — tune joint signs live in the viewer
 #
 set -euo pipefail
 
@@ -150,11 +150,12 @@ echo "Config saved to: $CONFIG_PATH"
 # ------------------------------------------------------------------
 echo ""
 echo "============================================"
-echo "  Step 3: MuJoCo Sim Teleop"
+echo "  Step 3: MuJoCo Sim Teleop + Sign Tuning"
 echo "============================================"
 echo ""
-echo "Launching MuJoCo viewer — move the Joylo to see the sim Franka move."
-echo "Close the viewer window or Ctrl+C to exit."
+echo "Launching MuJoCo viewer — move the Joylo and watch the sim Franka."
+echo "If a joint moves the wrong way, type its number (0-6) to flip it."
+echo "Type 's' to save, 'q' to quit."
 echo ""
 
 python "$SCRIPT_DIR/examples/sim_teleop.py" --config "$CONFIG_PATH"

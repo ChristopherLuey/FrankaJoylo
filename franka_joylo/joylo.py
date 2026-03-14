@@ -98,6 +98,15 @@ class Joylo:
         """Send feedforward gravity compensation currents."""
         self.command_currents(self._gravity_comp_currents)
 
+    @property
+    def joint_signs(self) -> np.ndarray:
+        """Current joint sign array (shape (7,), values +1 or -1)."""
+        return self._joint_signs.copy()
+
+    def flip_joint_sign(self, joint_idx: int) -> None:
+        """Flip the sign (+1 <-> -1) for a single joint."""
+        self._joint_signs[joint_idx] *= -1
+
     def disable_torque(self) -> None:
         """Disable torque on all motors."""
         self._driver_5v.set_torque(False)
