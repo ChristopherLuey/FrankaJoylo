@@ -1,6 +1,8 @@
 """Low-level Dynamixel SDK wrapper — one instance per USB port."""
 
+import os
 import threading
+import time
 
 import numpy as np
 from dynamixel_sdk import (
@@ -22,13 +24,15 @@ from franka_joylo.constants import (
     dxl_hiword,
 )
 
+ADDR_HARDWARE_ERROR_STATUS = 70
+
 PROTOCOL_VERSION = 2.0
 
 
 class DxlDriver:
     """Manages a single Dynamixel bus (one USB port, multiple motors)."""
 
-    def __init__(self, port: str, motor_ids: list[int], baudrate: int = 57600):
+    def __init__(self, port: str, motor_ids: list[int], baudrate: int = 1000000):
         self.port = port
         self.motor_ids = motor_ids
         self.baudrate = baudrate
@@ -41,6 +45,9 @@ class DxlDriver:
             raise RuntimeError(f"Failed to open port {port}")
         if not self._port_handler.setBaudRate(baudrate):
             raise RuntimeError(f"Failed to set baudrate {baudrate} on {port}")
+
+        self._set_latency_timer(1)
+        self._clear_hardware_errors()
 
     def set_operating_mode(self, mode: int) -> None:
         """Set operating mode for all motors. Disables torque first, does NOT re-enable."""
@@ -56,30 +63,37 @@ class DxlDriver:
             for mid in self.motor_ids:
                 self._write1(ADDR_TORQUE_ENABLE, mid, val)
 
-    def read_positions(self) -> dict[int, int]:
+    def read_positions(self, retries: int = 3) -> dict[int, int]:
         """SyncRead present position (4 bytes) from all motors. Returns signed raw values."""
         with self._lock:
-            sync_read = GroupSyncRead(
-                self._port_handler, self._packet_handler,
-                ADDR_PRESENT_POSITION, 4,
-            )
-            for mid in self.motor_ids:
-                sync_read.addParam(mid)
-
-            result = sync_read.txRxPacket()
-            if result != 0:
-                raise RuntimeError(
-                    f"SyncRead failed on {self.port}: "
-                    f"{self._packet_handler.getTxRxResult(result)}"
+            last_err = None
+            for attempt in range(retries):
+                sync_read = GroupSyncRead(
+                    self._port_handler, self._packet_handler,
+                    ADDR_PRESENT_POSITION, 4,
                 )
+                for mid in self.motor_ids:
+                    sync_read.addParam(mid)
 
-            positions = {}
-            for mid in self.motor_ids:
-                raw = sync_read.getData(mid, ADDR_PRESENT_POSITION, 4)
-                positions[mid] = int(np.int32(np.uint32(raw)))
+                result = sync_read.txRxPacket()
+                if result != 0:
+                    last_err = (
+                        f"SyncRead failed on {self.port}: "
+                        f"{self._packet_handler.getTxRxResult(result)}"
+                    )
+                    sync_read.clearParam()
+                    time.sleep(0.001)
+                    continue
 
-            sync_read.clearParam()
-            return positions
+                positions = {}
+                for mid in self.motor_ids:
+                    raw = sync_read.getData(mid, ADDR_PRESENT_POSITION, 4)
+                    positions[mid] = int(np.int32(np.uint32(raw)))
+
+                sync_read.clearParam()
+                return positions
+
+            raise RuntimeError(last_err)
 
     def write_positions(self, positions: dict[int, int]) -> None:
         """SyncWrite goal position (4 bytes) to specified motors."""
@@ -132,6 +146,37 @@ class DxlDriver:
             self._port_handler.closePort()
 
     # --- Private helpers ---
+    def _set_latency_timer(self, ms: int) -> None:
+        """Lower the FTDI USB-serial latency timer for faster reads.
+
+        The Python Dynamixel SDK does not set this (the C version does).
+        Default is 16 ms, which caps SyncRead throughput at ~60 Hz per bus.
+        """
+        real_path = os.path.realpath(self.port)
+        dev_name = os.path.basename(real_path)
+        sysfs_path = f"/sys/bus/usb-serial/devices/{dev_name}/latency_timer"
+        try:
+            with open(sysfs_path, "w") as f:
+                f.write(str(ms))
+        except PermissionError:
+            print(f"[DxlDriver] Warning: cannot set latency timer on {self.port}. "
+                  f"Run once: sudo chmod a+w {sysfs_path}")
+        except FileNotFoundError:
+            pass  # Not an FTDI adapter
+
+    def _clear_hardware_errors(self) -> None:
+        """Check each motor for hardware errors and reboot any that have them."""
+        for mid in self.motor_ids:
+            val, res, _ = self._packet_handler.read1ByteTxRx(
+                self._port_handler, mid, ADDR_HARDWARE_ERROR_STATUS,
+            )
+            if res == 0 and val != 0:
+                print(f"[DxlDriver] Motor {mid} on {self.port} has hardware error "
+                      f"(status=0x{val:02x}), rebooting...")
+                self._packet_handler.reboot(self._port_handler, mid)
+                import time
+                time.sleep(0.5)
+
     def _write1(self, addr: int, motor_id: int, value: int) -> None:
         """Write 1 byte. Must be called with lock held."""
         result, error = self._packet_handler.write1ByteTxRx(

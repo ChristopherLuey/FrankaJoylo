@@ -23,8 +23,8 @@ class MyFranka(FrankaInterface):
 def main():
     franka = MyFranka()
     joylo = Joylo(
-        port_5v="/dev/ttyUSB0",
-        port_12v="/dev/ttyUSB1",
+        port_5v="/dev/franka_small",
+        port_12v="/dev/franka_large",
         joint_signs=np.array([1, 1, 1, 1, 1, 1, 1], dtype=float),
         joint_offsets_rad=franka.read_joint_positions(),
     )

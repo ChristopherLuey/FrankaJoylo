@@ -3,11 +3,13 @@
 import numpy as np
 
 from franka_joylo.constants import (
-    CONTROLLER_1_MOTOR_IDS,
-    CONTROLLER_2_MOTOR_IDS,
     DXL_TO_RAD,
+    DXL_ZERO_OFFSETS,
+    JOINT_MAP,
     MODE_CURRENT,
     MODE_POSITION,
+    MOTOR_IDS_5V,
+    MOTOR_IDS_12V,
     RAD_TO_DXL,
 )
 from franka_joylo.dxl_driver import DxlDriver
@@ -26,7 +28,7 @@ class Joylo:
         baudrate: Dynamixel baudrate.
         joint_signs: Array of shape (7,) with +1 or -1 per joint for direction mapping.
         joint_offsets_rad: Array of shape (7,) — Franka joint angles (radians)
-            matching the Joylo's startup pose.
+            matching the Joylo's zero pose.
         gravity_comp_currents: Array of shape (7,) — feedforward currents for
             gravity compensation in current mode. If None, zeros are used.
     """
@@ -37,15 +39,13 @@ class Joylo:
         port_12v: str,
         motor_ids_5v: list[int] | None = None,
         motor_ids_12v: list[int] | None = None,
-        baudrate: int = 57600,
+        baudrate: int = 1000000,
         joint_signs: np.ndarray | None = None,
         joint_offsets_rad: np.ndarray | None = None,
         gravity_comp_currents: np.ndarray | None = None,
     ):
-        self.motor_ids_5v = motor_ids_5v or CONTROLLER_1_MOTOR_IDS
-        self.motor_ids_12v = motor_ids_12v or CONTROLLER_2_MOTOR_IDS
-        self._all_motor_ids = sorted(self.motor_ids_5v + self.motor_ids_12v)
-        assert len(self._all_motor_ids) == NUM_JOINTS
+        self.motor_ids_5v = motor_ids_5v or MOTOR_IDS_5V
+        self.motor_ids_12v = motor_ids_12v or MOTOR_IDS_12V
 
         self._driver_5v = DxlDriver(port_5v, self.motor_ids_5v, baudrate)
         self._driver_12v = DxlDriver(port_12v, self.motor_ids_12v, baudrate)
@@ -53,9 +53,6 @@ class Joylo:
         self._joint_signs = joint_signs if joint_signs is not None else np.ones(NUM_JOINTS)
         self._joint_offsets_rad = joint_offsets_rad if joint_offsets_rad is not None else np.zeros(NUM_JOINTS)
         self._gravity_comp_currents = gravity_comp_currents if gravity_comp_currents is not None else np.zeros(NUM_JOINTS, dtype=int)
-
-        # Calibration: record raw DXL positions at startup
-        self._dxl_init = self._read_raw_positions()
 
     # --- Public API ---
 
@@ -88,9 +85,7 @@ class Joylo:
 
     def command_currents(self, currents: np.ndarray) -> None:
         """Command raw goal currents. Motors must be in current mode."""
-        current_dict = {mid: int(currents[i]) for i, mid in enumerate(self._all_motor_ids)}
-        currents_5v = {mid: current_dict[mid] for mid in self.motor_ids_5v}
-        currents_12v = {mid: current_dict[mid] for mid in self.motor_ids_12v}
+        currents_5v, currents_12v = self._split_by_controller(currents)
         self._driver_5v.write_currents(currents_5v)
         self._driver_12v.write_currents(currents_12v)
 
@@ -109,8 +104,15 @@ class Joylo:
         return self._joint_offsets_rad.copy()
 
     def flip_joint_sign(self, joint_idx: int) -> None:
-        """Flip the sign (+1 <-> -1) for a single joint."""
+        """Flip the sign (+1 <-> -1) for a single joint.
+
+        Adjusts the offset so the current position is preserved —
+        only the direction of future motion changes.
+        """
+        current_pos = self.joint_positions[joint_idx]
+        old_offset = self._joint_offsets_rad[joint_idx]
         self._joint_signs[joint_idx] *= -1
+        self._joint_offsets_rad[joint_idx] = 2 * current_pos - old_offset
 
     def nudge_joint_offset(self, joint_idx: int, delta_rad: float) -> None:
         """Add delta_rad to a single joint's offset."""
@@ -129,23 +131,32 @@ class Joylo:
     # --- Private helpers ---
 
     def _read_raw_positions(self) -> np.ndarray:
-        """Read raw DXL positions from both controllers, return shape (7,) ordered by motor ID."""
+        """Read raw DXL positions from both controllers, return shape (7,) ordered by joint index."""
         pos_5v = self._driver_5v.read_positions()
         pos_12v = self._driver_12v.read_positions()
-        merged = {**pos_5v, **pos_12v}
-        return np.array([merged[mid] for mid in self._all_motor_ids], dtype=np.float64)
+        raw = np.empty(NUM_JOINTS, dtype=np.float64)
+        for joint_idx, (controller, motor_id) in enumerate(JOINT_MAP):
+            if controller == "5v":
+                raw[joint_idx] = pos_5v[motor_id]
+            else:
+                raw[joint_idx] = pos_12v[motor_id]
+        return raw
 
     def _dxl_to_rad(self, raw: np.ndarray) -> np.ndarray:
-        """Convert raw DXL positions to radians using calibration."""
-        return (raw - self._dxl_init) * self._joint_signs * DXL_TO_RAD + self._joint_offsets_rad
+        """Convert raw DXL positions to radians using hardcoded zero offsets."""
+        return (raw - DXL_ZERO_OFFSETS) * self._joint_signs * DXL_TO_RAD + self._joint_offsets_rad
 
     def _rad_to_dxl(self, rad: np.ndarray) -> np.ndarray:
-        """Convert radians to raw DXL positions using calibration."""
-        return (rad - self._joint_offsets_rad) / self._joint_signs * RAD_TO_DXL + self._dxl_init
+        """Convert radians to raw DXL positions using hardcoded zero offsets."""
+        return (rad - self._joint_offsets_rad) / self._joint_signs * RAD_TO_DXL + DXL_ZERO_OFFSETS
 
-    def _split_by_controller(self, raw: np.ndarray) -> tuple[dict[int, int], dict[int, int]]:
-        """Split a (7,) array (ordered by motor ID) into dicts for each controller."""
-        all_dict = {mid: int(raw[i]) for i, mid in enumerate(self._all_motor_ids)}
-        pos_5v = {mid: all_dict[mid] for mid in self.motor_ids_5v}
-        pos_12v = {mid: all_dict[mid] for mid in self.motor_ids_12v}
-        return pos_5v, pos_12v
+    def _split_by_controller(self, values: np.ndarray) -> tuple[dict[int, int], dict[int, int]]:
+        """Split a (7,) array (ordered by joint index) into dicts for each controller."""
+        dict_5v: dict[int, int] = {}
+        dict_12v: dict[int, int] = {}
+        for joint_idx, (controller, motor_id) in enumerate(JOINT_MAP):
+            if controller == "5v":
+                dict_5v[motor_id] = int(values[joint_idx])
+            else:
+                dict_12v[motor_id] = int(values[joint_idx])
+        return dict_5v, dict_12v

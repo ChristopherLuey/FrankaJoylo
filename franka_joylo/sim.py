@@ -7,7 +7,7 @@ import numpy as np
 
 from franka_joylo.franka_interface import FrankaInterface
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "franka_panda.xml"
+MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "franka_emika_panda" / "scene_nohand.xml"
 NUM_JOINTS = 7
 
 

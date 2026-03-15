@@ -2,6 +2,8 @@
 
 from math import pi
 
+import numpy as np
+
 # --- Register addresses (Protocol 2.0) ---
 ADDR_OPERATING_MODE = 11    # 1 byte
 ADDR_TORQUE_ENABLE = 64     # 1 byte
@@ -15,8 +17,18 @@ MODE_CURRENT = 0
 MODE_POSITION = 3
 
 # --- Motor ID groups by controller ---
-CONTROLLER_1_MOTOR_IDS = [2, 4, 5, 6]  # 5V, XL330
-CONTROLLER_2_MOTOR_IDS = [0, 1, 3]     # 12V, XL430
+MOTOR_IDS_5V = [0, 1, 2, 3]   # 5V, XL330
+MOTOR_IDS_12V = [0, 1, 2]     # 12V, XL430
+
+# --- Joint-to-controller mapping ---
+# Each entry is (controller, motor_id) for joint index 0-6
+JOINT_MAP: list[tuple[str, int]] = [
+    ("12v", 0), ("12v", 1), ("5v", 0), ("12v", 2),
+    ("5v", 1),  ("5v", 2),  ("5v", 3),
+]
+
+# --- DXL zero-point offsets (raw position when Franka joint is at 0 rad) ---
+DXL_ZERO_OFFSETS = np.array([3072, 1024, 0, 1024, 2048, 1024, 0], dtype=np.float64)
 
 # --- Unit conversion ---
 # XL330 and XL430 both have 4096 steps per revolution

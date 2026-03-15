@@ -4,6 +4,7 @@ Interactive tuning — type commands in the terminal while watching the sim:
 
   0-6       select active joint
   f         flip sign of active joint
+  z         snap all offsets (freeze sim at home, match Joylo, press Enter)
   + / -     nudge offset of active joint by +/- 0.1 rad
   ] / [     nudge offset of active joint by +/- 0.01 rad (fine)
   r         reset offset of active joint to 0
@@ -50,7 +51,8 @@ def _save_config(config_path: str, joylo: Joylo):
         json.dump(config, f, indent=2)
 
 
-def _input_loop(joylo: Joylo, config_path: str, stop_event: threading.Event):
+def _input_loop(joylo: Joylo, system: JoyloSystem, sim_franka: SimFrankaInterface,
+                home_qpos: np.ndarray, config_path: str, stop_event: threading.Event):
     active = 0
     _print_status(joylo, active)
 
@@ -72,6 +74,19 @@ def _input_loop(joylo: Joylo, config_path: str, stop_event: threading.Event):
             s = "+" if joylo.joint_signs[active] > 0 else "-"
             print(f"  J{active} sign -> {s}1")
             _print_status(joylo, active)
+        elif cmd == "z":
+            system.stop()
+            sim_franka.send_joint_positions(home_qpos)
+            print()
+            print("  Sim frozen at home pose. Move the Joylo to match, then press Enter.")
+            print(f"  Home: {np.array2string(home_qpos, precision=3, separator=', ')}")
+            input("  Press Enter when ready... ")
+            current = joylo.joint_positions
+            for i in range(7):
+                joylo.nudge_joint_offset(i, home_qpos[i] - current[i])
+            print("  Offsets snapped!")
+            _print_status(joylo, active)
+            system.start_teleop()
         elif cmd == "+":
             joylo.nudge_joint_offset(active, COARSE_STEP)
             print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (+{COARSE_STEP})")
@@ -97,8 +112,9 @@ def _input_loop(joylo: Joylo, config_path: str, stop_event: threading.Event):
             _save_config(config_path, joylo)
             print(f"  Saved to {config_path}")
         else:
-            print("  Commands: 0-6 (select joint), f (flip sign), +/- (offset 0.1),")
-            print("           ]/[ (offset 0.01), r (reset offset), s (save), q (quit)")
+            print("  Commands: 0-6 (select joint), f (flip sign), z (snap offsets),")
+            print("           +/- (offset 0.1), ]/[ (offset 0.01), r (reset offset),")
+            print("           s (save), q (quit)")
 
 
 def main():
@@ -120,7 +136,8 @@ def main():
 
     sim_franka = SimFrankaInterface.create()
     model, data = sim_franka.model, sim_franka.data
-    data.ctrl[:] = data.qpos[:7]
+    home_qpos = data.qpos[:7].copy()
+    data.ctrl[:7] = home_qpos
 
     joylo = Joylo(
         port_5v=config["port_5v"],
@@ -138,16 +155,18 @@ def main():
     print("Teleop running. Move the Joylo and watch the sim Franka.")
     print()
     print("  0-6       select joint         f         flip sign")
-    print("  + / -     offset +/- 0.1 rad   ] / [     offset +/- 0.01 rad")
-    print("  r         reset offset          s         save config")
-    print("  q         quit")
+    print("  z         snap all offsets     + / -     offset +/- 0.1 rad")
+    print("  ] / [     offset +/- 0.01     r         reset offset")
+    print("  s         save config          q         quit")
     print()
 
     system.start_teleop()
 
     stop_event = threading.Event()
     input_thread = threading.Thread(
-        target=_input_loop, args=(joylo, args.config, stop_event), daemon=True,
+        target=_input_loop,
+        args=(joylo, system, sim_franka, home_qpos, args.config, stop_event),
+        daemon=True,
     )
     input_thread.start()
 
