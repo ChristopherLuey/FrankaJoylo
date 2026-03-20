@@ -65,9 +65,57 @@ Launches a MuJoCo viewer with the Franka model. Move the Joylo and watch the sim
 | `s` | Save config to `config.json` |
 | `q` | Quit |
 
-## Usage
+## Real Robot Teleop (deoxys)
 
-Once calibrated, use the package in your own code. You must provide a concrete `FrankaInterface` for your Franka setup:
+To teleoperate the real Franka using [deoxys](https://github.com/UT-Austin-RPL/deoxys_control) (the driver used by svl-franka-tutorial):
+
+### Prerequisites
+
+1. **deoxys running on the NUC** — start the arm controller:
+   ```bash
+   # On the NUC
+   ./auto_arm.sh config/charmander.yml
+   ```
+
+2. **deoxys Python package installed** on the workstation (the machine running FrankaJoylo). This is already the case if you're working inside the svl-franka-tutorial environment.
+
+3. **Joylo connected** via USB, with udev symlinks set up (`./setup.sh` step 1).
+
+4. **`config.json` calibrated** — run `./setup.sh` at least through steps 1-3 (sim tuning) first.
+
+### Running
+
+```bash
+conda activate franka_joylo
+python examples/real_teleop.py --mode takeover
+```
+
+Modes:
+
+| Mode | Behavior |
+|------|----------|
+| `takeover` (default) | Starts in tracking (Franka leads, Joylo follows). Press Enter to switch to teleop (Joylo leads, Franka follows). Press Enter again to stop. |
+| `tracking` | Franka leads, Joylo mirrors. Press Enter to stop. |
+| `teleop` | Joylo leads, Franka follows. Press Enter to stop. |
+
+Options: `--rate` (Hz, default 100), `--alpha` (EMA smoothing, default 0.95), `--config` (path to config.json).
+
+### Tuning compliant gains
+
+In teleop mode the Franka uses low-impedance joint control so it's compliant. The default gains (`kp=[10,10,10,10,5,5,2]`, `kd=[6,6,6,6,4,4,2]`) may need tuning on your robot. You can override them in code:
+
+```python
+from franka_joylo.deoxys_franka import DeoxysFrankaInterface
+
+franka = DeoxysFrankaInterface(
+    compliant_kp=[8, 8, 8, 8, 4, 4, 2],
+    compliant_kd=[5, 5, 5, 5, 3, 3, 1],
+)
+```
+
+## Custom FrankaInterface
+
+For other Franka setups (not deoxys), subclass `FrankaInterface`:
 
 ```python
 import json
@@ -124,11 +172,12 @@ These values are stored in `config.json` and loaded at runtime.
 
 ```
 franka_joylo/
-├── __init__.py            # Re-exports: FrankaInterface, Joylo, JoyloSystem
+├── __init__.py            # Re-exports: FrankaInterface, Joylo, JoyloSystem, (DeoxysFrankaInterface)
 ├── constants.py           # Register addresses, JOINT_MAP, DXL_ZERO_OFFSETS, unit conversions
 ├── dxl_driver.py          # Low-level DXL SDK wrapper (one instance per USB port)
 ├── joylo.py               # Manages 7 motors across 2 DxlDrivers via JOINT_MAP
 ├── franka_interface.py    # Abstract base class for Franka communication
+├── deoxys_franka.py       # Adapter for deoxys driver (optional, requires deoxys)
 ├── sim.py                 # MuJoCo SimFrankaInterface for testing without hardware
 └── joylo_system.py        # Top-level orchestrator: tracking + teleop modes
 ```
