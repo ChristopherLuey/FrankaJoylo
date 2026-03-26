@@ -1,6 +1,7 @@
 """MuJoCo sim teleop: Joylo drives a simulated Franka in a 3D viewer.
 
-Interactive tuning — type commands in the terminal while watching the sim:
+Interactive tuning — type commands in the terminal while watching the sim.
+Changes take effect live but are NOT saved to disk until you press 's'.
 
   0-6       select active joint
   f         flip sign of active joint
@@ -9,7 +10,7 @@ Interactive tuning — type commands in the terminal while watching the sim:
   ] / [     nudge offset of active joint by +/- 0.01 rad (fine)
   r         reset offset of active joint to 0
   s         save config to disk
-  q         quit
+  q         quit (unsaved changes are discarded)
 """
 
 import argparse
@@ -23,6 +24,7 @@ import mujoco.viewer
 import numpy as np
 
 from franka_joylo import Joylo, JoyloSystem
+from franka_joylo.constants import FRANKA_JOINT_MAX, FRANKA_JOINT_MIN
 from franka_joylo.sim import SimFrankaInterface
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
@@ -114,7 +116,7 @@ def _input_loop(joylo: Joylo, system: JoyloSystem, sim_franka: SimFrankaInterfac
         else:
             print("  Commands: 0-6 (select joint), f (flip sign), z (snap offsets),")
             print("           +/- (offset 0.1), ]/[ (offset 0.01), r (reset offset),")
-            print("           s (save), q (quit)")
+            print("           s (save to disk), q (quit, unsaved changes discarded)")
 
 
 def main():
@@ -137,7 +139,6 @@ def main():
     sim_franka = SimFrankaInterface.create()
     model, data = sim_franka.model, sim_franka.data
     home_qpos = data.qpos[:7].copy()
-    data.ctrl[:7] = home_qpos
 
     joylo = Joylo(
         port_5v=config["port_5v"],
@@ -146,6 +147,11 @@ def main():
         joint_offsets_rad=np.array(config["joint_offsets_rad"]),
         gravity_comp_currents=np.array(config.get("gravity_comp_currents", [0]*7), dtype=int),
     )
+
+    initial_q = np.clip(joylo.joint_positions, FRANKA_JOINT_MIN, FRANKA_JOINT_MAX)
+    data.qpos[:7] = initial_q
+    data.ctrl[:7] = initial_q
+    mujoco.mj_forward(model, data)
 
     system = JoyloSystem(sim_franka, joylo,
                          control_rate_hz=args.rate,
@@ -157,7 +163,7 @@ def main():
     print("  0-6       select joint         f         flip sign")
     print("  z         snap all offsets     + / -     offset +/- 0.1 rad")
     print("  ] / [     offset +/- 0.01     r         reset offset")
-    print("  s         save config          q         quit")
+    print("  s         save to disk         q         quit (discards unsaved)")
     print()
 
     system.start_teleop()

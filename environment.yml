@@ -8,4 +8,10 @@ dependencies:
   - pip:
       - dynamixel-sdk
       - mujoco>=3.0
+      - pyyaml
+      - easydict
+      - termcolor
+      - pyzmq
+      - protobuf<4
+      - pybullet
       - -e .

@@ -5,6 +5,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from franka_joylo.constants import FRANKA_JOINT_MAX, FRANKA_JOINT_MIN
 from franka_joylo.franka_interface import FrankaInterface
 
 MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "franka_emika_panda" / "scene_nohand.xml"
@@ -37,7 +38,7 @@ class SimFrankaInterface(FrankaInterface):
         return self.data.qpos[:NUM_JOINTS].copy()
 
     def send_joint_positions(self, positions: np.ndarray) -> None:
-        self.data.ctrl[:NUM_JOINTS] = positions
+        self.data.ctrl[:NUM_JOINTS] = np.clip(positions, FRANKA_JOINT_MIN, FRANKA_JOINT_MAX)
 
     def start_gravity_comp(self) -> None:
         pass  # Position actuators continue tracking in sim

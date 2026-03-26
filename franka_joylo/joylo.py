@@ -156,7 +156,7 @@ class Joylo:
         dict_12v: dict[int, int] = {}
         for joint_idx, (controller, motor_id) in enumerate(JOINT_MAP):
             if controller == "5v":
-                dict_5v[motor_id] = int(values[joint_idx])
+                dict_5v[motor_id] = int(round(values[joint_idx]))
             else:
-                dict_12v[motor_id] = int(values[joint_idx])
+                dict_12v[motor_id] = int(round(values[joint_idx]))
         return dict_5v, dict_12v

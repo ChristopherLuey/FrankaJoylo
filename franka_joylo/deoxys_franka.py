@@ -7,6 +7,7 @@ import copy
 
 import numpy as np
 
+from franka_joylo.constants import FRANKA_JOINT_MAX, FRANKA_JOINT_MIN
 from franka_joylo.franka_interface import FrankaInterface
 
 # Default impedance gains — stiff for normal position tracking.
@@ -78,6 +79,7 @@ class DeoxysFrankaInterface(FrankaInterface):
         return self._robot.last_q.copy()
 
     def send_joint_positions(self, positions: np.ndarray) -> None:
+        positions = np.clip(positions, FRANKA_JOINT_MIN, FRANKA_JOINT_MAX)
         action = np.concatenate([positions, [self._gripper_action]])
         cfg = copy.deepcopy(self._base_cfg)
         cfg["joint_kp"] = list(self._active_kp)

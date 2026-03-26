@@ -35,6 +35,13 @@ DXL_ZERO_OFFSETS = np.array([3072, 1024, 0, 1024, 2048, 1024, 0], dtype=np.float
 DXL_TO_RAD = pi / 2048.0
 RAD_TO_DXL = 2048.0 / pi
 
+# --- Franka Panda joint position limits (radians) ---
+FRANKA_JOINT_MIN = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
+FRANKA_JOINT_MAX = np.array([ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973])
+
+# --- Franka Panda home pose (matches MJCF keyframe) ---
+FRANKA_HOME = np.array([0.0, 0.0, 0.0, -pi / 2, 0.0, pi / 2, -pi / 4])
+
 
 # --- Byte helpers ---
 def dxl_lobyte(value: int) -> int:

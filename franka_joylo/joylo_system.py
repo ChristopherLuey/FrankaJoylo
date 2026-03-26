@@ -103,7 +103,7 @@ class JoyloSystem:
                 time.sleep(self._dt - elapsed)
 
     def _teleop_loop(self) -> None:
-        smoothed = self._joylo.joint_positions.copy()
+        smoothed = self._franka.read_joint_positions()
 
         while not self._stop_event.is_set():
             t0 = time.monotonic()
