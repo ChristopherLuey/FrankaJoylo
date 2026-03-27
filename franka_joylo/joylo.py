@@ -1,10 +1,14 @@
 """Manages 7 Joylo motors across 2 DxlDriver instances."""
 
+import threading
+
 import numpy as np
 
 from franka_joylo.constants import (
+    DXL_TICKS_PER_REV,
     DXL_TO_RAD,
     DXL_ZERO_OFFSETS,
+    FRANKA_JOINT_CENTER,
     JOINT_MAP,
     MODE_CURRENT,
     MODE_POSITION,
@@ -53,6 +57,7 @@ class Joylo:
         self._joint_signs = joint_signs if joint_signs is not None else np.ones(NUM_JOINTS)
         self._joint_offsets_rad = joint_offsets_rad if joint_offsets_rad is not None else np.zeros(NUM_JOINTS)
         self._gravity_comp_currents = gravity_comp_currents if gravity_comp_currents is not None else np.zeros(NUM_JOINTS, dtype=int)
+        self._cal_lock = threading.Lock()
 
     # --- Public API ---
 
@@ -60,7 +65,8 @@ class Joylo:
     def joint_positions(self) -> np.ndarray:
         """Read all 7 joint positions, return radians as shape (7,) array."""
         raw = self._read_raw_positions()
-        return self._dxl_to_rad(raw)
+        with self._cal_lock:
+            return self._dxl_to_rad(raw)
 
     def set_position_mode(self) -> None:
         """Switch all motors to position control mode and enable torque."""
@@ -78,7 +84,8 @@ class Joylo:
 
     def command_positions(self, target_rad: np.ndarray) -> None:
         """Command joint positions in radians. Motors must be in position mode."""
-        raw = self._rad_to_dxl(target_rad)
+        with self._cal_lock:
+            raw = self._rad_to_dxl(target_rad)
         positions_5v, positions_12v = self._split_by_controller(raw)
         self._driver_5v.write_positions(positions_5v)
         self._driver_12v.write_positions(positions_12v)
@@ -109,14 +116,17 @@ class Joylo:
         Adjusts the offset so the current position is preserved —
         only the direction of future motion changes.
         """
-        current_pos = self.joint_positions[joint_idx]
-        old_offset = self._joint_offsets_rad[joint_idx]
-        self._joint_signs[joint_idx] *= -1
-        self._joint_offsets_rad[joint_idx] = 2 * current_pos - old_offset
+        raw = self._read_raw_positions()
+        with self._cal_lock:
+            current_pos = self._dxl_to_rad(raw)[joint_idx]
+            old_offset = self._joint_offsets_rad[joint_idx]
+            self._joint_signs[joint_idx] *= -1
+            self._joint_offsets_rad[joint_idx] = 2 * current_pos - old_offset
 
     def nudge_joint_offset(self, joint_idx: int, delta_rad: float) -> None:
         """Add delta_rad to a single joint's offset."""
-        self._joint_offsets_rad[joint_idx] += delta_rad
+        with self._cal_lock:
+            self._joint_offsets_rad[joint_idx] += delta_rad
 
     def disable_torque(self) -> None:
         """Disable torque on all motors."""
@@ -125,8 +135,10 @@ class Joylo:
 
     def close(self) -> None:
         """Disable torque and close both ports."""
-        self._driver_5v.close()
-        self._driver_12v.close()
+        try:
+            self._driver_5v.close()
+        finally:
+            self._driver_12v.close()
 
     # --- Private helpers ---
 
@@ -143,12 +155,20 @@ class Joylo:
         return raw
 
     def _dxl_to_rad(self, raw: np.ndarray) -> np.ndarray:
-        """Convert raw DXL positions to radians using hardcoded zero offsets."""
-        return (raw - DXL_ZERO_OFFSETS) * self._joint_signs * DXL_TO_RAD + self._joint_offsets_rad
+        """Convert raw DXL positions to radians, robust to encoder wrapping.
+
+        Computes the angle then normalizes to within ±π of each joint's
+        range center.  This handles multi-turn accumulation, reboots, and
+        asymmetric DXL ranges (e.g. joint 5 whose operating delta exceeds
+        half a revolution from DXL_ZERO_OFFSETS).
+        """
+        rad = (raw - DXL_ZERO_OFFSETS) * self._joint_signs * DXL_TO_RAD + self._joint_offsets_rad
+        return FRANKA_JOINT_CENTER + np.mod(rad - FRANKA_JOINT_CENTER + np.pi, 2 * np.pi) - np.pi
 
     def _rad_to_dxl(self, rad: np.ndarray) -> np.ndarray:
-        """Convert radians to raw DXL positions using hardcoded zero offsets."""
-        return (rad - self._joint_offsets_rad) / self._joint_signs * RAD_TO_DXL + DXL_ZERO_OFFSETS
+        """Convert radians to absolute DXL positions (0-4095 range)."""
+        delta = (rad - self._joint_offsets_rad) / self._joint_signs * RAD_TO_DXL
+        return np.mod(DXL_ZERO_OFFSETS + delta, DXL_TICKS_PER_REV)
 
     def _split_by_controller(self, values: np.ndarray) -> tuple[dict[int, int], dict[int, int]]:
         """Split a (7,) array (ordered by joint index) into dicts for each controller."""

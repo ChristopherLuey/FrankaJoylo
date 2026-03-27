@@ -53,6 +53,15 @@ def _save_config(config_path: str, joylo: Joylo):
         json.dump(config, f, indent=2)
 
 
+def _snap_and_restart(system: JoyloSystem, sim_franka: SimFrankaInterface, joylo: Joylo):
+    """Stop teleop, snap sim to current Joylo-mapped position, restart teleop."""
+    system.stop()
+    q = np.clip(joylo.joint_positions, FRANKA_JOINT_MIN, FRANKA_JOINT_MAX)
+    sim_franka.data.qpos[:7] = q
+    sim_franka.data.ctrl[:7] = q
+    system.start_teleop()
+
+
 def _input_loop(joylo: Joylo, system: JoyloSystem, sim_franka: SimFrankaInterface,
                 home_qpos: np.ndarray, config_path: str, stop_event: threading.Event):
     active = 0
@@ -76,6 +85,7 @@ def _input_loop(joylo: Joylo, system: JoyloSystem, sim_franka: SimFrankaInterfac
             s = "+" if joylo.joint_signs[active] > 0 else "-"
             print(f"  J{active} sign -> {s}1")
             _print_status(joylo, active)
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "z":
             system.stop()
             sim_franka.send_joint_positions(home_qpos)
@@ -88,28 +98,33 @@ def _input_loop(joylo: Joylo, system: JoyloSystem, sim_franka: SimFrankaInterfac
                 joylo.nudge_joint_offset(i, home_qpos[i] - current[i])
             print("  Offsets snapped!")
             _print_status(joylo, active)
-            system.start_teleop()
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "+":
             joylo.nudge_joint_offset(active, COARSE_STEP)
             print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (+{COARSE_STEP})")
             _print_status(joylo, active)
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "-":
             joylo.nudge_joint_offset(active, -COARSE_STEP)
             print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (-{COARSE_STEP})")
             _print_status(joylo, active)
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "]":
             joylo.nudge_joint_offset(active, FINE_STEP)
             print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (+{FINE_STEP})")
             _print_status(joylo, active)
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "[":
             joylo.nudge_joint_offset(active, -FINE_STEP)
             print(f"  J{active} offset -> {joylo.joint_offsets_rad[active]:+.3f} rad  (-{FINE_STEP})")
             _print_status(joylo, active)
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "r":
             old = joylo.joint_offsets_rad[active]
             joylo.nudge_joint_offset(active, -old)
             print(f"  J{active} offset -> 0.000 rad  (reset)")
             _print_status(joylo, active)
+            _snap_and_restart(system, sim_franka, joylo)
         elif cmd == "s":
             _save_config(config_path, joylo)
             print(f"  Saved to {config_path}")

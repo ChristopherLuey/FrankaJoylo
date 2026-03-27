@@ -142,6 +142,8 @@ class DxlDriver:
         """Disable torque and close the port."""
         try:
             self.set_torque(False)
+        except RuntimeError as e:
+            print(f"[DxlDriver] Warning: could not disable torque on {self.port}: {e}")
         finally:
             self._port_handler.closePort()
 
@@ -174,8 +176,19 @@ class DxlDriver:
                 print(f"[DxlDriver] Motor {mid} on {self.port} has hardware error "
                       f"(status=0x{val:02x}), rebooting...")
                 self._packet_handler.reboot(self._port_handler, mid)
-                import time
-                time.sleep(0.5)
+                time.sleep(1.0)
+                for attempt in range(10):
+                    val2, res2, _ = self._packet_handler.read1ByteTxRx(
+                        self._port_handler, mid, ADDR_HARDWARE_ERROR_STATUS,
+                    )
+                    if res2 == 0 and val2 == 0:
+                        print(f"[DxlDriver] Motor {mid} on {self.port} recovered.")
+                        break
+                    time.sleep(0.5)
+                else:
+                    print(f"[DxlDriver] WARNING: Motor {mid} on {self.port} still has "
+                          f"hardware error after reboot (status=0x{val2:02x}). "
+                          f"Check power supply and wiring.")
 
     def _write1(self, addr: int, motor_id: int, value: int) -> None:
         """Write 1 byte. Must be called with lock held."""
