@@ -65,7 +65,6 @@ class JoyloSystem:
         self._stop_control()
         self._joylo.disable_torque()
         self._joylo.set_current_mode()
-        self._franka.start_gravity_comp()
         self._stop_event.clear()
         self._control_thread = threading.Thread(
             target=self._teleop_loop, daemon=True,
@@ -121,8 +120,9 @@ class JoyloSystem:
         while not self._stop_event.is_set():
             t0 = time.monotonic()
 
-            self._joylo.command_gravity_comp()
-
+            # Read Joylo first, command Franka ASAP, then do gravity comp.
+            # Gravity comp is important but not latency-critical — moving it
+            # after the Franka command keeps it off the read-to-command path.
             joylo_q = self._joylo.joint_positions
             self._joylo_positions = joylo_q
 
@@ -130,6 +130,8 @@ class JoyloSystem:
 
             self._franka.send_joint_positions(smoothed)
             self._franka_positions = self._franka.read_joint_positions()
+
+            self._joylo.command_gravity_comp()
 
             elapsed = time.monotonic() - t0
             if elapsed < self._dt:
@@ -139,7 +141,6 @@ class JoyloSystem:
         """Handle mode transition from tracking to teleop."""
         self._joylo.disable_torque()
         self._joylo.set_current_mode()
-        self._franka.start_gravity_comp()
         self._stop_event.clear()
         self._control_thread = threading.Thread(
             target=self._teleop_loop, daemon=True,

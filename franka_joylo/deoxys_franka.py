@@ -72,6 +72,7 @@ class DeoxysFrankaInterface(FrankaInterface):
         # Start in stiff mode.
         self._active_kp = self._stiff_kp
         self._active_kd = self._stiff_kd
+        self._active_cfg = self._build_controller_cfg()
 
     # --- FrankaInterface implementation ---
 
@@ -81,25 +82,33 @@ class DeoxysFrankaInterface(FrankaInterface):
     def send_joint_positions(self, positions: np.ndarray) -> None:
         positions = np.clip(positions, FRANKA_JOINT_MIN, FRANKA_JOINT_MAX)
         action = np.concatenate([positions, [self._gripper_action]])
-        cfg = copy.deepcopy(self._base_cfg)
-        cfg["joint_kp"] = list(self._active_kp)
-        cfg["joint_kd"] = list(self._active_kd)
         self._robot.control(
             controller_type="JOINT_IMPEDANCE",
             action=action,
-            controller_cfg=cfg,
+            controller_cfg=self._active_cfg,
         )
 
     def start_gravity_comp(self) -> None:
         self._active_kp = self._compliant_kp
         self._active_kd = self._compliant_kd
+        self._active_cfg = self._build_controller_cfg()
         # Send current position with new gains so the switch is jerk-free.
         self.send_joint_positions(self.read_joint_positions())
 
     def stop_gravity_comp(self) -> None:
         self._active_kp = self._stiff_kp
         self._active_kd = self._stiff_kd
+        self._active_cfg = self._build_controller_cfg()
         self.send_joint_positions(self.read_joint_positions())
+
+    # --- Private helpers ---
+
+    def _build_controller_cfg(self):
+        """Build a controller config with the current active gains."""
+        cfg = copy.deepcopy(self._base_cfg)
+        cfg["joint_kp"] = list(self._active_kp)
+        cfg["joint_kd"] = list(self._active_kd)
+        return cfg
 
     # --- Extra helpers ---
 

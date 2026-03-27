@@ -1,6 +1,7 @@
 """Manages 7 Joylo motors across 2 DxlDriver instances."""
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -58,6 +59,7 @@ class Joylo:
         self._joint_offsets_rad = joint_offsets_rad if joint_offsets_rad is not None else np.zeros(NUM_JOINTS)
         self._gravity_comp_currents = gravity_comp_currents if gravity_comp_currents is not None else np.zeros(NUM_JOINTS, dtype=int)
         self._cal_lock = threading.Lock()
+        self._io_executor = ThreadPoolExecutor(max_workers=1)
 
     # --- Public API ---
 
@@ -93,14 +95,16 @@ class Joylo:
         with self._cal_lock:
             raw = self._rad_to_dxl(target_rad)
         positions_5v, positions_12v = self._split_by_controller(raw)
-        self._driver_5v.write_positions(positions_5v)
+        future = self._io_executor.submit(self._driver_5v.write_positions, positions_5v)
         self._driver_12v.write_positions(positions_12v)
+        future.result()
 
     def command_currents(self, currents: np.ndarray) -> None:
         """Command raw goal currents. Motors must be in current mode."""
         currents_5v, currents_12v = self._split_by_controller(currents)
-        self._driver_5v.write_currents(currents_5v)
+        future = self._io_executor.submit(self._driver_5v.write_currents, currents_5v)
         self._driver_12v.write_currents(currents_12v)
+        future.result()
 
     def command_gravity_comp(self) -> None:
         """Send feedforward gravity compensation currents."""
@@ -145,13 +149,15 @@ class Joylo:
             self._driver_5v.close()
         finally:
             self._driver_12v.close()
+        self._io_executor.shutdown(wait=False)
 
     # --- Private helpers ---
 
     def _read_raw_positions(self) -> np.ndarray:
         """Read raw DXL positions from both controllers, return shape (7,) ordered by joint index."""
-        pos_5v = self._driver_5v.read_positions()
+        future = self._io_executor.submit(self._driver_5v.read_positions)
         pos_12v = self._driver_12v.read_positions()
+        pos_5v = future.result()
         raw = np.empty(NUM_JOINTS, dtype=np.float64)
         for joint_idx, (controller, motor_id) in enumerate(JOINT_MAP):
             if controller == "5v":
