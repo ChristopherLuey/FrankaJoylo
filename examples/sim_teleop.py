@@ -59,7 +59,7 @@ def _snap_and_restart(system: JoyloSystem, sim_franka: SimFrankaInterface, joylo
     q = np.clip(joylo.joint_positions, FRANKA_JOINT_MIN, FRANKA_JOINT_MAX)
     sim_franka.data.qpos[:7] = q
     sim_franka.data.ctrl[:7] = q
-    system.start_teleop()
+    system.restart_teleop()
 
 
 def _input_loop(joylo: Joylo, system: JoyloSystem, sim_franka: SimFrankaInterface,

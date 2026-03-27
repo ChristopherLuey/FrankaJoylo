@@ -79,6 +79,12 @@ class Joylo:
         """Switch all motors to current control mode and enable torque."""
         self._driver_5v.set_operating_mode(MODE_CURRENT)
         self._driver_12v.set_operating_mode(MODE_CURRENT)
+        # Zero goal currents before enabling torque. Changing operating mode
+        # resets Goal Current to Current Limit; enabling torque at that value
+        # causes a current surge that sags the 5V rail and trips the input
+        # voltage error on lower-power motors (e.g. XC330-T288).
+        self._driver_5v.write_currents({mid: 0 for mid in self.motor_ids_5v})
+        self._driver_12v.write_currents({mid: 0 for mid in self.motor_ids_12v})
         self._driver_5v.set_torque(True)
         self._driver_12v.set_torque(True)
 

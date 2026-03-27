@@ -76,6 +76,19 @@ class JoyloSystem:
         """Stop the active control loop."""
         self._stop_control()
 
+    def restart_teleop(self) -> None:
+        """Restart the teleop loop without changing motor modes.
+
+        Use when calibration parameters change mid-teleop and you need
+        to reset the EMA smoother, but motors are already in current mode.
+        """
+        self._stop_control()
+        self._stop_event.clear()
+        self._control_thread = threading.Thread(
+            target=self._teleop_loop, daemon=True,
+        )
+        self._control_thread.start()
+
     def close(self) -> None:
         """Stop control and clean up all resources."""
         self._stop_control()
