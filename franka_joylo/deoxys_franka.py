@@ -54,7 +54,7 @@ class DeoxysFrankaInterface(FrankaInterface):
         self._robot = DeoxysRobotInterface(
             config_path,
             use_visualizer=False,
-            has_gripper=False,
+            has_gripper=True,
             control_freq=control_freq,
             automatic_gripper_reset=False,
         )
